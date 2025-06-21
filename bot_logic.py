@@ -126,6 +126,7 @@ MENU_TEXTS = {
         "overall_parking_map_link_text": "\n\n<a href=\"{overall_map_url}\" data-embed=\"true\">🗺️ {RouteName} வழிக்கான அனைத்து வாகன நிறுத்துமிடங்களையும் காண்க</a>",
         "temple_timings_details": "திருச்செந்தூர் முருகன் கோவில் பொது நேரங்கள்:",
         "temple_dress_code_details": "ஆடை கட்டுப்பாடு: பாரம்பரிய உடை பரிந்துரைக்கப்படுகிறது. ஆண்கள்: வேட்டி/பேண்ட். பெண்கள்: புடவை/சல்வார் கமீஸ்.",
+        "temple_seva_details_intro": "--- சேவை மற்றும் டிக்கெட் விவரங்கள் ---",
         "goodbye_message": "நன்றி! வணக்கம்!",
         "nearest_place_intro": "📍 திருச்செந்தூர் பகுதியில் {place_type_display_name} தேடல் முடிவுகள்:",
         "place_details_maps": "\n{name}\nமுகவரி: {address}\n🗺️ {maps_url}"
@@ -186,7 +187,7 @@ class BotLogic:
         return {"text": text, "photos": photos or [], "buttons": buttons or []}
 
     def process_user_input(self, user_id: str, input_type: str, data: Any, user_name: str = "User") -> Dict:
-        if user_id not in self.user_states:
+        if data == "start_session_command" or user_id not in self.user_states:
             self.user_states[user_id] = {"lang": "en", "menu_level": "language_select"}
             return self._change_language(user_id, is_initial=True, user_name=user_name)
         
@@ -204,7 +205,8 @@ class BotLogic:
         text_input = str(data).strip()
         if text_input.lower() == 'x':
             lang = state.get("lang", "en")
-            del self.user_states[user_id]
+            if user_id in self.user_states:
+                del self.user_states[user_id]
             return self._get_response_structure(self.get_text(lang, "goodbye_message"))
 
         handler = getattr(self, f"_handle_{state.get('menu_level', 'main_menu')}", self._handle_invalid_state)
@@ -212,7 +214,9 @@ class BotLogic:
 
     def _handle_invalid_state(self, user_id, text_input):
         self.user_states[user_id]["menu_level"] = "main_menu"
-        return self._get_response_structure(f"{self.get_text(user_id, 'invalid_menu_option')}\n\n{self._get_menu_text('main_menu', user_id)}")
+        response = self._get_response_structure(self.get_text(user_id, 'invalid_menu_option'))
+        response['next_menu'] = 'main_menu'
+        return response
 
     def _handle_main_menu(self, user_id, choice):
         menu_actions = {
@@ -231,12 +235,19 @@ class BotLogic:
         if new_level:
             self.user_states[user_id]["menu_level"] = new_level
             prompt_map = {"parking_awaiting_route": "parking_route_prompt", "temple_info_menu": "temple_info_menu_prompt", "nearby_search": "freestyle_query_prompt"}
-            return self._get_response_structure(self.get_text(user_id, prompt_map[new_level]))
+            if new_level == "temple_info_menu":
+                 return self._get_response_structure(self._get_menu_text(new_level, user_id))
+            else:
+                 return self._get_response_structure(self.get_text(user_id, prompt_map[new_level]))
         
         elif action:
             result = action()
-            if isinstance(result, dict): return result
-            return self._get_response_structure(f"{result}\n\n{self._get_menu_text('main_menu', user_id)}")
+            if isinstance(result, dict):
+                result['next_menu'] = 'main_menu'
+                return result
+            response = self._get_response_structure(text=result)
+            response['next_menu'] = 'main_menu'
+            return response
         
         return self._handle_invalid_state(user_id, choice)
 
@@ -258,7 +269,7 @@ class BotLogic:
         else:
             response["text"] = self.get_text(user_id, "invalid_menu_option")
 
-        response["text"] += f"\n\n{self._get_menu_text('temple_info_menu', user_id)}"
+        response['next_menu'] = 'temple_info_menu'
         return response
 
     def _handle_parking_awaiting_route(self, user_id, text_input):
@@ -269,12 +280,16 @@ class BotLogic:
         elif "2" in choice or "thoothukudi" in choice: route_pref = "thoothukudi"
         elif "3" in choice or "nagercoil" in choice: route_pref = "nagercoil"
         parking_reply = self.find_available_parking(self.TIRUCHENDUR_COORDS[0], self.TIRUCHENDUR_COORDS[1], user_id, route_preference=route_pref)
-        return self._get_response_structure(f"{parking_reply}\n\n{self._get_menu_text('main_menu', user_id)}")
+        response = self._get_response_structure(text=parking_reply)
+        response['next_menu'] = 'main_menu'
+        return response
 
     def _handle_nearby_search(self, user_id, text_input):
         self.user_states[user_id]["menu_level"] = "main_menu"
         search_reply = self.find_nearby_place(self.TIRUCHENDUR_COORDS[0], self.TIRUCHENDUR_COORDS[1], text_input, user_id=user_id)
-        return self._get_response_structure(f"{search_reply}\n\n{self._get_menu_text('main_menu', user_id)}")
+        response = self._get_response_structure(text=search_reply)
+        response['next_menu'] = 'main_menu'
+        return response
 
     def _change_language(self, user_id, is_initial=False, user_name="User"):
         self.user_states[user_id]['menu_level'] = 'language_select'
@@ -325,27 +340,18 @@ class BotLogic:
             self.gspread_client = None
             return None
 
-    def fetch_sheet_data(self, sheet_name, worksheet_name, force_reauth=False):
-        logger.info(f"Attempting to fetch data from {sheet_name}/{worksheet_name}.")
-        client = self.get_gspread_client(force_reauth=force_reauth)
+    def fetch_sheet_data(self, sheet_name, worksheet_name):
+        client = self.get_gspread_client()
         if not client: 
-            logger.error(f"Cannot fetch data for {sheet_name}; gspread client is not available.")
+            logger.error(f"Cannot fetch {sheet_name}; gspread client is not available.")
             return []
         try:
-            spreadsheet = client.open(sheet_name)
-            worksheet = spreadsheet.worksheet(worksheet_name)
-            records = worksheet.get_all_records()
+            records = client.open(sheet_name).worksheet(worksheet_name).get_all_records()
             logger.info(f"Successfully fetched {len(records)} records from {sheet_name}/{worksheet_name}.")
             return records
-        except gspread.exceptions.APIError as e:
-            if e.response.status_code == 429:
-                logger.warning(f"Quota exceeded for {sheet_name}. Retrying may be needed later.")
-            else:
-                 logger.error(f"GSpread API Error fetching {sheet_name}: {e}")
-            if e.response.status_code in [401, 403]:
-                self.gspread_client = None
         except Exception as e:
-            logger.error(f"Unexpected error fetching sheet {sheet_name}: {e}", exc_info=True)
+            logger.error(f"Error fetching sheet {sheet_name}: {e}", exc_info=True)
+            if 'expired' in str(e).lower() or 'REFRESH_TOKEN' in str(e).upper(): self.gspread_client = None
         return []
 
     def fetch_local_info_from_sheet(self, worksheet_name: str, force_refresh: bool = False):
@@ -353,11 +359,10 @@ class BotLogic:
         if not force_refresh and (time.time() - last_fetch < self.LOCAL_INFO_CACHE_DURATION):
             return
         
-        if force_refresh or not self.LOCAL_INFO_CACHE.get(worksheet_name):
-            records = self.fetch_sheet_data(GOOGLE_SHEET_LOCAL_INFO_NAME, worksheet_name)
-            if records:
-                self.LOCAL_INFO_CACHE[worksheet_name] = records
-                self.LAST_LOCAL_INFO_FETCH_TIME[worksheet_name] = time.time()
+        records = self.fetch_sheet_data(GOOGLE_SHEET_LOCAL_INFO_NAME, worksheet_name)
+        if records:
+            self.LOCAL_INFO_CACHE[worksheet_name] = records
+            self.LAST_LOCAL_INFO_FETCH_TIME[worksheet_name] = time.time()
 
     def fetch_parking_lots_info(self, force_refresh: bool = False):
         if not force_refresh and (time.time() - self.LAST_PARKING_LOTS_INFO_FETCH_TIME < self.STATIC_DATA_CACHE_DURATION) and self.PARKING_LOTS_INFO_CACHE:
@@ -392,7 +397,6 @@ class BotLogic:
             data_items = self.LOCAL_INFO_CACHE.get(worksheet_name, [])
 
         lang = self.user_states[user_id].get("lang", "en")
-        
         format_map = {
             SHEET_HELP_CENTRES: ("option_help_centres", "local_info_item_format", "View Map"),
             SHEET_FIRST_AID: ("option_first_aid", "local_info_item_format", "View Map"),
@@ -404,8 +408,7 @@ class BotLogic:
         category_key, item_format_key, link_text = format_map.get(worksheet_name, ("", "", ""))
         if not category_key: return "Error: Unknown data category."
         
-        if worksheet_name == SHEET_DESIGNATED_PARKING_STATIC: category_name = category_key
-        else: category_name = self.get_text(user_id, category_key).split('. ', 1)[-1]
+        category_name = self.get_text(user_id, category_key).split('. ', 1)[-1] if '.' in self.get_text(user_id, category_key) else self.get_text(user_id, category_key)
         
         if not data_items:
             logger.warning(f"No data for {worksheet_name}. Check sheet content/permissions.")
@@ -472,7 +475,7 @@ class BotLogic:
         title = self.get_text(user_id, "parking_for_route_title" if route_preference and route_preference != "any" else "parking_info_title", RouteName=route_preference.capitalize())
         
         details_list = []
-        for lot in sorted_lots: # Show all available lots
+        for lot in sorted_lots:
             embed_url = self._generate_embed_link(mode="directions", origin=f"{user_lat},{user_lon}", destination=f"{lot['Latitude']},{lot['Longitude']}")
             maps_link = f'<a href="{embed_url}" data-embed="true">Get Directions</a>' if embed_url else "Directions unavailable"
             details_list.append(self.get_text(user_id, "parking_lot_details_format", ParkingName=lot.get(f"Parking_name_{current_lang}", lot.get("Parking_name_en")), Distance=lot['Distance'], Availability=lot['Availability'], TotalCapacity=lot['TotalCapacity'], PercentageFull=lot['PercentageFull'], MapsLink=maps_link))
