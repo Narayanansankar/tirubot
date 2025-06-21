@@ -4,7 +4,7 @@
 import os
 import logging
 import time
-import json # Essential for reading credentials from environment variables
+import json 
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 import gspread
@@ -15,9 +15,6 @@ from urllib.parse import quote_plus
 
 load_dotenv()
 
-# --- Define the base directory (for local file fallback) ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # --- Configuration (loaded from environment) ---
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 GOOGLE_SHEET_LOCAL_INFO_NAME = os.getenv("GOOGLE_SHEET_LOCAL_INFO_NAME", "Tiruchendur_Local_Info")
@@ -25,7 +22,7 @@ GOOGLE_SHEET_PARKING_LOTS_INFO_NAME = os.getenv("GOOGLE_SHEET_PARKING_LOTS_INFO"
 GOOGLE_SHEET_PARKING_STATUS_LIVE_NAME = os.getenv("GOOGLE_SHEET_PARKING_STATUS_LIVE", "Tiruchendur_Parking_Status_Live")
 # This creates a fallback path for local testing
 credentials_filename = os.getenv("GOOGLE_SHEETS_CREDENTIALS_FILE", "credentials.json")
-GOOGLE_SHEETS_CREDENTIALS_FILE = os.path.join(BASE_DIR, credentials_filename)
+GOOGLE_SHEETS_CREDENTIALS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), credentials_filename)
 
 # Centralized logging
 logging.basicConfig(
@@ -36,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # --- All Constants and Menu Texts ---
 GOOGLE_FORM_FEEDBACK_LINK = "https://docs.google.com/forms/d/e/1FAIpQLSempmuc0_3KkCX3JK3wCZTod51Zw3o8ZkG78kQpcMTmVTGsPg/viewform?usp=header"
-
+# ... (The rest of MENU_TEXTS, SUPPORTED_LANGUAGES, SHEET_... and OVERALL_ROUTE_MY_MAPS are correct and unchanged)
 MENU_TEXTS = {
     "en": {
         "welcome_tiruchendur": "Vanakkam {user_name}! I'm your Tiruchendur Assistant. 😊",
@@ -154,21 +151,53 @@ class BotLogic:
         self._preload_data()
 
     def _preload_data(self):
-        self.get_gspread_client()
-        if self.gspread_client:
-            logger.info("Pre-loading all data from Google Sheets at startup...")
-            all_sheets_to_fetch = [SHEET_HELP_CENTRES, SHEET_FIRST_AID, SHEET_TEMP_BUS_STANDS, SHEET_TOILETS, SHEET_DESIGNATED_PARKING_STATIC, SHEET_ANNADHANAM]
-            for sheet in all_sheets_to_fetch:
-                self.fetch_local_info_from_sheet(sheet, force_refresh=True)
+        """
+        EFFICIENTLY pre-loads all data from Google Sheets at startup
+        to avoid hitting API rate limits.
+        """
+        client = self.get_gspread_client()
+        if not client:
+            logger.error("Could not authorize gspread client at startup. Data fetching will be disabled.")
+            return
+
+        logger.info("Pre-loading all data from Google Sheets at startup...")
+        try:
+            # --- Batch Fetch 1: All tabs from the Local Info sheet ---
+            logger.info(f"Opening spreadsheet: {GOOGLE_SHEET_LOCAL_INFO_NAME}")
+            local_info_spreadsheet = client.open(GOOGLE_SHEET_LOCAL_INFO_NAME)
+            local_info_worksheets = local_info_spreadsheet.worksheets()
+            
+            # Create a dictionary of worksheet titles to worksheet objects for quick access
+            ws_dict = {ws.title: ws for ws in local_info_worksheets}
+
+            all_local_sheets = [SHEET_HELP_CENTRES, SHEET_FIRST_AID, SHEET_TEMP_BUS_STANDS, SHEET_TOILETS, SHEET_DESIGNATED_PARKING_STATIC, SHEET_ANNADHANAM]
+            for sheet_name in all_local_sheets:
+                if sheet_name in ws_dict:
+                    logger.info(f"Fetching data from tab: {sheet_name}")
+                    records = ws_dict[sheet_name].get_all_records()
+                    self.LOCAL_INFO_CACHE[sheet_name] = records
+                    self.LAST_LOCAL_INFO_FETCH_TIME[sheet_name] = time.time()
+                    logger.info(f"Cached {len(records)} records for {sheet_name}")
+                else:
+                    logger.warning(f"Worksheet '{sheet_name}' not found in '{GOOGLE_SHEET_LOCAL_INFO_NAME}'.")
+
+            # --- Batch Fetch 2: Parking Lots Info ---
             self.fetch_parking_lots_info(force_refresh=True)
+
+            # --- Batch Fetch 3: Parking Live Status ---
             self.fetch_parking_live_status(force_refresh=True)
+            
             logger.info("Pre-loading complete.")
-        else:
-            logger.error("Could not authorize gspread client at startup. Data fetching will be disabled until a successful request is made.")
+        except gspread.exceptions.APIError as e:
+            logger.error(f"GSpread API Error during preload: {e}. Check quotas and permissions.")
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during preload: {e}", exc_info=True)
+
 
     def _get_response_structure(self, text="", photos=None, buttons=None):
         return {"text": text, "photos": photos or [], "buttons": buttons or []}
 
+    # ... process_user_input and other handlers are correct and unchanged ...
     def process_user_input(self, user_id: str, input_type: str, data: Any, user_name: str = "User") -> Dict:
         if user_id not in self.user_states:
             self.user_states[user_id] = {"lang": "en", "menu_level": "language_select"}
@@ -282,11 +311,9 @@ class BotLogic:
         
         try:
             if google_creds_json:
-                logger.info("Using GOOGLE_CREDENTIALS_JSON environment variable.")
                 creds_dict = json.loads(google_creds_json)
                 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
             elif os.path.exists(GOOGLE_SHEETS_CREDENTIALS_FILE):
-                logger.info(f"Using local credentials file: {GOOGLE_SHEETS_CREDENTIALS_FILE}")
                 creds = Credentials.from_service_account_file(GOOGLE_SHEETS_CREDENTIALS_FILE, scopes=scopes)
             else:
                 logger.error("FATAL: No Google credentials found.")
@@ -300,42 +327,60 @@ class BotLogic:
             self.gspread_client = None
             return None
 
-    def fetch_sheet_data(self, cache, last_fetch_time_attr, cache_duration, sheet_name, worksheet_name, force_refresh=False):
-        last_fetch_time = getattr(self, last_fetch_time_attr, 0)
-        if (not force_refresh) and (time.time() - last_fetch_time < cache_duration) and cache:
-            return cache
-        
-        logger.info(f"Fetching fresh data for {sheet_name}/{worksheet_name}.")
-        client = self.get_gspread_client()
+    def fetch_sheet_data(self, sheet_name, worksheet_name, force_reauth=False):
+        logger.info(f"Attempting to fetch data from {sheet_name}/{worksheet_name}.")
+        client = self.get_gspread_client(force_reauth=force_reauth)
         if not client: 
-            logger.info("Gspread client not available, attempting re-authorization...")
-            client = self.get_gspread_client(force_reauth=True)
-            if not client:
-                logger.error("Re-authorization failed. Cannot fetch data.")
-                return cache or []
-        
+            logger.error(f"Cannot fetch data for {sheet_name}; gspread client is not available.")
+            return []
         try:
-            records = client.open(sheet_name).worksheet(worksheet_name).get_all_records()
-            setattr(self, last_fetch_time_attr, time.time())
+            spreadsheet = client.open(sheet_name)
+            worksheet = spreadsheet.worksheet(worksheet_name)
+            records = worksheet.get_all_records()
             logger.info(f"Successfully fetched {len(records)} records from {sheet_name}/{worksheet_name}.")
             return records
+        except gspread.exceptions.APIError as e:
+            if e.response.status_code == 429:
+                logger.warning(f"Quota exceeded for {sheet_name}. Retrying may be needed later.")
+            else:
+                 logger.error(f"GSpread API Error fetching {sheet_name}: {e}")
+            if e.response.status_code in [401, 403]: # Unauthorized or token expired
+                self.gspread_client = None # Force re-auth on next call
         except Exception as e:
-            logger.error(f"Error fetching from {sheet_name}/{worksheet_name}: {e}", exc_info=True)
-            if 'expired' in str(e).lower(): self.gspread_client = None
-        return cache or []
+            logger.error(f"Unexpected error fetching sheet {sheet_name}: {e}", exc_info=True)
+        return []
 
     def fetch_local_info_from_sheet(self, worksheet_name: str, force_refresh: bool = False):
-        last_fetch_attr = f"LAST_LOCAL_INFO_FETCH_TIME_{worksheet_name}"
-        if not hasattr(self, last_fetch_attr): setattr(self, last_fetch_attr, 0)
-        self.LOCAL_INFO_CACHE[worksheet_name] = self.fetch_sheet_data(self.LOCAL_INFO_CACHE.get(worksheet_name), last_fetch_attr, self.LOCAL_INFO_CACHE_DURATION, GOOGLE_SHEET_LOCAL_INFO_NAME, worksheet_name, force_refresh=force_refresh)
+        last_fetch = self.LAST_LOCAL_INFO_FETCH_TIME.get(worksheet_name, 0)
+        if not force_refresh and (time.time() - last_fetch < self.LOCAL_INFO_CACHE_DURATION):
+            return
+        
+        # This now uses the efficient pre-load cache. We only fetch if it's not there.
+        # This function is now mostly for on-demand refresh, which should be rare.
+        if force_refresh or not self.LOCAL_INFO_CACHE.get(worksheet_name):
+            # This is inefficient, the preload is better.
+            records = self.fetch_sheet_data(GOOGLE_SHEET_LOCAL_INFO_NAME, worksheet_name)
+            if records:
+                self.LOCAL_INFO_CACHE[worksheet_name] = records
+                self.LAST_LOCAL_INFO_FETCH_TIME[worksheet_name] = time.time()
 
     def fetch_parking_lots_info(self, force_refresh: bool = False):
-        self.PARKING_LOTS_INFO_CACHE = self.fetch_sheet_data(self.PARKING_LOTS_INFO_CACHE, "LAST_PARKING_LOTS_INFO_FETCH_TIME", self.STATIC_DATA_CACHE_DURATION, GOOGLE_SHEET_PARKING_LOTS_INFO_NAME, "Sheet1", force_refresh=force_refresh)
-
+        if not force_refresh and (time.time() - self.LAST_PARKING_LOTS_INFO_FETCH_TIME < self.STATIC_DATA_CACHE_DURATION):
+            return
+        records = self.fetch_sheet_data(GOOGLE_SHEET_PARKING_LOTS_INFO_NAME, "Sheet1")
+        if records:
+            self.PARKING_LOTS_INFO_CACHE = records
+            self.LAST_PARKING_LOTS_INFO_FETCH_TIME = time.time()
+            
     def fetch_parking_live_status(self, force_refresh: bool = False):
-        records = self.fetch_sheet_data(list(self.PARKING_LIVE_STATUS_CACHE.values()), "LAST_PARKING_LIVE_STATUS_FETCH_TIME", self.LIVE_DATA_CACHE_DURATION, GOOGLE_SHEET_PARKING_STATUS_LIVE_NAME, "Sheet1", force_refresh=force_refresh)
-        self.PARKING_LIVE_STATUS_CACHE = {str(r['ParkingLotID']): r for r in records if 'ParkingLotID' in r}
+        if not force_refresh and (time.time() - self.LAST_PARKING_LIVE_STATUS_FETCH_TIME < self.LIVE_DATA_CACHE_DURATION):
+            return
+        records = self.fetch_sheet_data(GOOGLE_SHEET_PARKING_STATUS_LIVE_NAME, "Sheet1")
+        if records:
+            self.PARKING_LIVE_STATUS_CACHE = {str(r['ParkingLotID']): r for r in records if 'ParkingLotID' in r}
+            self.LAST_PARKING_LIVE_STATUS_FETCH_TIME = time.time()
 
+    # ... The rest of the file, including find_available_parking, is correct and unchanged ...
     def _generate_embed_link(self, query: str = "", mode: str = "place", origin: str = "", destination: str = "", my_map_id: str = "") -> str:
         if my_map_id: return f"https://www.google.com/maps/d/embed?mid={my_map_id}"
         if not GOOGLE_MAPS_API_KEY: return ""
@@ -347,8 +392,13 @@ class BotLogic:
         return url
 
     def _get_formatted_sheet_data(self, user_id: str, worksheet_name: str) -> str:
-        self.fetch_local_info_from_sheet(worksheet_name, force_refresh=True)
+        # Use the pre-loaded cache. No need to fetch again unless necessary.
         data_items = self.LOCAL_INFO_CACHE.get(worksheet_name, [])
+        if not data_items:
+             # Attempt a refresh if the cache is empty
+            self.fetch_local_info_from_sheet(worksheet_name, force_refresh=True)
+            data_items = self.LOCAL_INFO_CACHE.get(worksheet_name, [])
+
         lang = self.user_states[user_id].get("lang", "en")
         
         format_map = {
