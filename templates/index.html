@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tiruchendur Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         /* All the beautiful new CSS is kept */
         * {
@@ -115,7 +118,7 @@
             color: #ffd700;
             font-style: italic;
             text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
-            cursor: pointer; /* Make it look clickable */
+            cursor: pointer;
         }
         
         @keyframes fadeIn {
@@ -197,6 +200,21 @@
         .chat-button { background-color: #fff; border: 1px solid #ff8c00; color: #ff8c00; padding: 8px 12px; border-radius: 20px; cursor: pointer; text-align: center; font-weight: 500; font-family: 'Poppins', sans-serif; font-size: 0.9em; transition: all 0.2s ease; }
         .chat-button:hover { background-color: #ff8c00; color: white; }
         .chat-button:disabled { background-color: #e0e0e0; color: #a0a0a0; border-color: #e0e0e0; cursor: not-allowed; }
+
+        /* Styles for chat images */
+        .photo-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 10px; /* Add space between images and text */
+        }
+        .chat-image {
+            max-width: 100%;
+            border-radius: 10px;
+            height: auto;
+            display: block;
+        }
+
     </style>
 </head>
 <body>
@@ -207,31 +225,18 @@
         </header>
 
         <div id="content-viewer" class="content-viewer">
-            <!-- The filename should match what you have in your static/ folder -->
-            <img src="{{ url_for('static', filename='tiruchendur_temple.webp') }}" alt="Tiruchendur Murugan Temple">
+            <!-- *** CORRECTED IMAGE PATH *** -->
+            <!-- Ensure you have a 'tiruchendur_temple.jpg' inside a folder named 'images' within your 'static' folder -->
+            <img src="{{ url_for('static', filename='images/tiruchendur_temple.jpg') }}" alt="Tiruchendur Murugan Temple">
         </div>
         
         <div class="history-section">
             <h2>History of Tiruchendur Murugan Temple</h2>
-                
-                <p>The <span class="highlight">Tiruchendur Murugan Temple</span> is one of the six sacred abodes of Lord Murugan (Arupadaiveedu). This ancient temple is located in the town of Tiruchendur in Tamil Nadu, India, on the shores of the Bay of Bengal.</p>
-                
-                <p>The temple's history dates back over <span class="highlight">2000 years</span>, with references found in ancient Tamil literature. According to legend, Lord Murugan came to Tiruchendur to wage war against the demon Surapadman. After a fierce battle that lasted several days, Murugan emerged victorious on the sixth day of the Tamil month of Aippasi, which is celebrated as <span class="highlight">Kanda Shashti</span>.</p>
-                
-                <p>The temple complex covers <span class="highlight">15 acres</span> and features a majestic <span class="highlight">157-foot tall gopuram</span> (tower) that was completed in the 17th century. The temple has undergone several renovations over the centuries, with significant contributions from various dynasties including the Pandyas, Cheras, and Cholas.</p>
-                
-                <p>What makes Tiruchendur unique is its location - the temple is built right on the <span class="highlight">seashore</span>, allowing devotees to perform rituals in the sea. The main deity is worshipped as <span class="highlight">Senthilandavan</span> (the red-hued lord of the sacred land).</p>
-                
-                <p>Major festivals celebrated at the temple include:</p>
-                <ul>
-                    <li><span class="highlight">Kanda Shashti</span> (Oct/Nov) - 6-day festival commemorating the victory over evil</li>
-                    <li><span class="highlight">Thai Poosam</span> (Jan/Feb) - Celebrated with processions and abhishekams</li>
-                    <li><span class="highlight">Panguni Uthiram</span> (Mar/Apr) - Wedding festival of Lord Murugan</li>
-                    <li><span class="highlight">Aavani Festival</span> (Aug/Sep) - Annual Brahmotsavam</li>
-                </ul>
+            <p>The <span class="highlight">Tiruchendur Murugan Temple</span> is one of the six sacred abodes of Lord Murugan (Arupadaiveedu). This ancient temple is located in the town of Tiruchendur in Tamil Nadu, India, on the shores of the Bay of Bengal.</p>
+            <p>The temple's history dates back over <span class="highlight">2000 years</span>, with references found in ancient Tamil literature. According to legend, Lord Murugan came to Tiruchendur to wage war against the demon Surapadman. After a fierce battle that lasted several days, Murugan emerged victorious on the sixth day of the Tamil month of Aippasi, which is celebrated as <span class="highlight">Kanda Shashti</span>.</p>
+            <p>The temple complex covers <span class="highlight">15 acres</span> and features a majestic <span class="highlight">157-foot tall gopuram</span> (tower) that was completed in the 17th century. The temple has undergone several renovations over the centuries, with significant contributions from various dynasties including the Pandyas, Cheras, and Cholas.</p>
         </div>
         
-        <!-- Give the prompt an ID so we can add an event listener -->
         <div id="open-chat-prompt" class="chatbot-prompt">
             * For Queries Use ChatBot
         </div>
@@ -276,7 +281,7 @@
         // --- DOM ELEMENT REFERENCES ---
         const contentViewer = document.getElementById('content-viewer');
         const chatOpener = document.getElementById('chat-opener');
-        const openChatPrompt = document.getElementById('open-chat-prompt'); // New element
+        const openChatPrompt = document.getElementById('open-chat-prompt');
         const chatWindow = document.getElementById('chat-window');
         const chatCloser = document.getElementById('chat-closer');
         const chatBox = document.getElementById('chat-box');
@@ -287,14 +292,14 @@
 
         // --- INITIALIZATION ---
         document.addEventListener('DOMContentLoaded', () => {
-            // Send an empty string as the initial "question" to trigger the
-            // new user flow in the backend and get the welcome message.
-            sendMessageToServer(""); 
+            // Send a unique "start" command to trigger the new user flow
+            // and get the initial welcome message from the backend.
+            sendMessageToServer("start_session_command"); 
         });
 
         // --- EVENT LISTENERS ---
         chatOpener.addEventListener('click', () => toggleChatWindow(true));
-        openChatPrompt.addEventListener('click', () => toggleChatWindow(true)); // New listener
+        openChatPrompt.addEventListener('click', () => toggleChatWindow(true));
         chatCloser.addEventListener('click', () => toggleChatWindow(false));
         messageForm.addEventListener('submit', handleFormSubmit);
         chatBox.addEventListener('click', handleChatBoxClick);
@@ -302,16 +307,14 @@
         // --- CORE FUNCTIONS ---
         function toggleChatWindow(show) {
             chatWindow.classList.toggle('visible', show);
-            if (show) {
-                userInput.focus();
-            }
+            if (show) userInput.focus();
         }
 
         function handleFormSubmit(event) {
             event.preventDefault();
             const question = userInput.value.trim();
             if (!question) return;
-            addMessage(question, 'user');
+            addMessage({ text: question, sender: 'user' });
             userInput.value = '';
             sendMessageToServer(question);
         }
@@ -322,14 +325,13 @@
             const embedLink = target.closest('a[data-embed="true"]');
             if (embedLink) {
                 event.preventDefault(); 
-                loadMapInIframe(embedLink.href);
+                loadContentInViewer(embedLink.href, 'iframe');
                 return;
             }
 
-            // This handles regular links that should open in a new tab
             const regularLink = target.closest('a:not([data-embed="true"])');
             if (regularLink) {
-                // Let the browser handle its default behavior (e.g., open in new tab for target="_blank")
+                // Let the browser handle opening in a new tab
                 return;
             }
 
@@ -339,7 +341,7 @@
                 const payload = chatButton.dataset.payload;
                 const buttonText = chatButton.textContent.trim();
                 
-                addMessage(buttonText, 'user');
+                addMessage({ text: buttonText, sender: 'user' });
                 
                 const buttonContainer = chatButton.closest('.button-container');
                 if (buttonContainer) {
@@ -350,25 +352,29 @@
             }
         }
 
-        function loadMapInIframe(mapUrl) {
-            console.log("Loading map in iframe:", mapUrl);
-            contentViewer.innerHTML = '';
-            const iframe = document.createElement('iframe');
-            iframe.src = mapUrl;
-            iframe.setAttribute('allowfullscreen', '');
-            iframe.setAttribute('loading', 'lazy');
-            iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
-            contentViewer.appendChild(iframe);
-            toggleChatWindow(false);
+        function loadContentInViewer(url, type = 'iframe') {
+            console.log(`Loading ${type} in viewer:`, url);
+            contentViewer.innerHTML = ''; // Clear previous content
+            if (type === 'iframe') {
+                const iframe = document.createElement('iframe');
+                iframe.src = url;
+                iframe.setAttribute('allowfullscreen', '');
+                iframe.setAttribute('loading', 'lazy');
+                iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+                contentViewer.appendChild(iframe);
+            } else if (type === 'image') {
+                const img = document.createElement('img');
+                img.src = url;
+                contentViewer.appendChild(img);
+            }
+            toggleChatWindow(false); // Hide chat to show the new content
         }
 
         async function sendMessageToServer(message) {
-            const isInitialMessage = message === "";
-
+            const isInitialMessage = message === "start_session_command";
+            
             toggleInput(false);
-            if (!isInitialMessage) {
-                showTypingIndicator(true);
-            }
+            if (!isInitialMessage) showTypingIndicator(true);
 
             try {
                 const response = await fetch('/ask', {
@@ -380,34 +386,46 @@
                 
                 const data = await response.json();
                 
-                if (!isInitialMessage) {
-                    showTypingIndicator(false);
-                }
-                addMessage(data.text, 'bot', data.buttons);
+                if (!isInitialMessage) showTypingIndicator(false);
+                addMessage({ text: data.text, sender: 'bot', buttons: data.buttons, photos: data.photos });
 
             } catch (error) {
                 console.error('Error fetching bot response:', error);
                 if (!isInitialMessage) showTypingIndicator(false);
-                addMessage('Sorry, I encountered a communication error. Please try again.', 'bot');
+                addMessage({ text: 'Sorry, I encountered a communication error. Please try again.', sender: 'bot' });
             } finally {
                 toggleInput(true);
             }
         }
         
-        function addMessage(text, sender, buttons = []) {
-            if (!text) return;
+        function addMessage({ text, sender, buttons = [], photos = [] }) {
+            if (!text && (!photos || photos.length === 0)) return;
 
             const shouldScroll = isScrolledToBottom();
-
             const messageElement = document.createElement('div');
             messageElement.classList.add('message', `${sender}-message`);
 
             const bubbleElement = document.createElement('div');
             bubbleElement.classList.add('bubble');
             
-            const textElement = document.createElement('div');
-            textElement.innerHTML = text; 
-            bubbleElement.appendChild(textElement);
+            if (photos && photos.length > 0) {
+                const photoContainer = document.createElement('div');
+                photoContainer.className = 'photo-container';
+                photos.forEach(photoUrl => {
+                    const img = document.createElement('img');
+                    img.src = photoUrl;
+                    img.alt = "Bot Image";
+                    img.className = 'chat-image';
+                    photoContainer.appendChild(img);
+                });
+                bubbleElement.appendChild(photoContainer);
+            }
+            
+            if (text) {
+                const textElement = document.createElement('div');
+                textElement.innerHTML = text; 
+                bubbleElement.appendChild(textElement);
+            }
             
             if (buttons && buttons.length > 0) {
                 const buttonContainer = document.createElement('div');
